@@ -8,8 +8,8 @@ Required Technologies:
 
 TODO:  
 . highjack syscalls (write, readdir, etc) to hide kernel module and any relevant
-  directories  
+  directories (Ian)  
 . create backdoor account and hide information from user  
 . hide kernel module from process table  
 . elevate hidden user's permissions on demand by using a local privilege-escalation
-  vulnerability  
+  vulnerability (Kevin)  
