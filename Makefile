@@ -1,7 +1,7 @@
-obj-m:=rooty.o
-KERNEL_DIR =/lib/modules/$(shell uname -r)/build
-PWD = $(shell PWD)
+obj-m += rootkit.o
+
 all:
-	$(MAKE) -C $(KERNEL_DIR) SUBDIRS=$(PWD)
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+
 clean:
-	rm -rf *.o *.ko *.symvers *.mod.* *.order
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
