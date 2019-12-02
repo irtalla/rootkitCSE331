@@ -8,6 +8,7 @@ int main(int argc, char* argv[]) {
 
     if (argc <= 2) {
         printf("usage: ssetreuid_test [ruid] [euid]\n");
+        printf("can get root privileges with ssetreuid_test 11111 11111\n");
         return -1;
     }
 
