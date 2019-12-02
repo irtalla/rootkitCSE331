@@ -12,7 +12,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    int x = setreuid(atoi(argv[1])atoi(argv[2]));
+    int x = setreuid(atoi(argv[1]), atoi(argv[2]));
     if (x != 0) perror("Error");
 
     printf("ruid: %d, euid: %d\n", getuid(), geteuid());
