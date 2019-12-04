@@ -1,3 +1,6 @@
+##IMPORTANT!!!!!##
+#Code is plagiarized. Only Ian Roi Talla wrote this code.#
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
