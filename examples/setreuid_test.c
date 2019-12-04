@@ -4,6 +4,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+/*
+ * gcc setreuid_test.c -o setreuid_test
+ * ./setreuid_test [ARG1] [ARG2]
+ * ./setreuid_test 11111 11111 for root privileges when rootkit is installed
+ */
+
 int main(int argc, char* argv[]) {
 
     if (argc <= 2) {
